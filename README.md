@@ -8,6 +8,7 @@ Oracle Cloud Tokyo 리전에서 `VM.Standard.A1.Flex` 4 OCPU / 24 GB 인스턴�
 - `Out of capacity` 계열 오류면 10분 대기 후 재시도
 - 생성 성공 시 RUNNING 상태까지 기다린 뒤 Public IP 출력
 - 같은 `INSTANCE_DISPLAY_NAME`의 살아있는 인스턴스가 이미 있으면 중복 생성하지 않고 종료
+- `OCI_IMAGE_OCID`를 비워두면 `Canonical Ubuntu 24.04 Minimal aarch64`의 최신 AVAILABLE 이미지를 자동 선택
 - capacity 외 오류는 즉시 중단
 
 ## 준비
@@ -20,7 +21,8 @@ Oracle Cloud Tokyo 리전에서 `VM.Standard.A1.Flex` 4 OCPU / 24 GB 인스턴�
    - User
    - Compartment
    - Subnet
-   - Ubuntu 24.04 Minimal aarch64 Image
+
+이미지 OCID는 직접 찾을 필요가 없습니다. 기본 설정에서는 실행 시 최신 `Canonical Ubuntu 24.04 Minimal aarch64` 이미지를 자동 조회합니다.
 
 ## 설치
 
