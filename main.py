@@ -49,7 +49,9 @@ def load_settings() -> dict:
         "region": env("OCI_REGION", "ap-tokyo-1"),
         "compartment_id": env("OCI_COMPARTMENT_OCID", required=True),
         "subnet_id": env("OCI_SUBNET_OCID", required=True),
-        "image_id": env("OCI_IMAGE_OCID", required=True),
+        "image_id": env("OCI_IMAGE_OCID") or None,
+        "image_os": env("OCI_IMAGE_OS", "Canonical Ubuntu"),
+        "image_os_version": env("OCI_IMAGE_OS_VERSION", "24.04 Minimal aarch64"),
         "availability_domain": env("OCI_AVAILABILITY_DOMAIN") or None,
         "ssh_public_key_path": os.path.expandvars(
             os.path.expanduser(env("SSH_PUBLIC_KEY_PATH", required=True))
@@ -104,6 +106,34 @@ def get_availability_domain(identity_client, settings: dict) -> str:
     return ads[0].name
 
 
+def resolve_image(compute_client, settings: dict):
+    if settings["image_id"]:
+        image = compute_client.get_image(settings["image_id"]).data
+        return image
+
+    images = compute_client.list_images(
+        compartment_id=settings["compartment_id"],
+        operating_system=settings["image_os"],
+        operating_system_version=settings["image_os_version"],
+        shape=settings["shape"],
+        sort_by="TIMECREATED",
+        sort_order="DESC",
+    ).data
+
+    available = [
+        image for image in images
+        if image.lifecycle_state == "AVAILABLE"
+    ]
+    if not available:
+        raise RuntimeError(
+            "No AVAILABLE image found for "
+            f"{settings['image_os']} {settings['image_os_version']} "
+            f"compatible with {settings['shape']}"
+        )
+
+    return available[0]
+
+
 def read_ssh_public_key(path: str) -> str:
     with open(path, "r", encoding="utf-8") as file:
         key = file.read().strip()
@@ -154,7 +184,7 @@ def is_capacity_error(exc: oci.exceptions.ServiceError) -> bool:
     return any(marker in text for marker in CAPACITY_ERROR_MARKERS)
 
 
-def launch_instance(compute_client, settings: dict, availability_domain: str, ssh_key: str):
+def launch_instance(compute_client, settings: dict, availability_domain: str, ssh_key: str, image_id: str):
     details = oci.core.models.LaunchInstanceDetails(
         availability_domain=availability_domain,
         compartment_id=settings["compartment_id"],
@@ -170,7 +200,7 @@ def launch_instance(compute_client, settings: dict, availability_domain: str, ss
             display_name=f"{settings['display_name']}-vnic",
         ),
         source_details=oci.core.models.InstanceSourceViaImageDetails(
-            image_id=settings["image_id"],
+            image_id=image_id,
             source_type="image",
         ),
         metadata={"ssh_authorized_keys": ssh_key},
@@ -202,6 +232,12 @@ def main() -> int:
 
         availability_domain = get_availability_domain(identity_client, settings)
         ssh_key = read_ssh_public_key(settings["ssh_public_key_path"])
+        image = resolve_image(compute_client, settings)
+        log(
+            f"Image: {image.display_name} / "
+            f"{image.operating_system} {image.operating_system_version} / "
+            f"{image.id}"
+        )
 
         log(
             f"Target: {settings['shape']} / "
@@ -229,7 +265,7 @@ def main() -> int:
 
             try:
                 instance = launch_instance(
-                    compute_client, settings, availability_domain, ssh_key
+                    compute_client, settings, availability_domain, ssh_key, image.id
                 )
             except oci.exceptions.ServiceError as exc:
                 if is_capacity_error(exc):
